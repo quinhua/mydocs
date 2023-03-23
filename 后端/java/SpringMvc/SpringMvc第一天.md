@@ -1,0 +1,1332 @@
+### 01-手撕SpringMVC框架第一版
+
+* 需求
+
+  * 在javaWeb环境中使用Spring框架
+
+* 代码实现
+
+  ```java
+  @WebServlet("/user/findAll")
+  public class FindAllUserController extends HttpServlet {
+  
+      @Override
+      protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          //获取UserService对象
+          BeanFactory beanFactory = new ClassPathXmlApplicationContext("spring-mvc.xml");
+          UserService userService = beanFactory.getBean(UserService.class);
+          userService.findAll();
+      }
+  
+      @Override
+      protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          doGet(req, resp);
+      }
+  }
+  ```
+  
+* 存在的问题
+
+  * 当多次请求`http://localhost:8080/user/findAll`, 在`FindAllUserController类`的`doGet方法`中, 会多次创建`BeanFactory对象`
+
+### 02-手撕SpringMVC框架第二版(掌握)
+
+* 概述
+
+  * 有两种解决方案
+    * ①方案一
+      * 第一次请求时, 创建BeanFactory对象并将其保存到应用域(ServletContext), 第二次请求时, 复用之前保存的BeanFactory对象.
+      * 注意: 第一次请求耗时较长.
+    * ②方案二: 推荐
+      * 当服务器启动时(ServletContextListener), 创建BeanFactory对象并将其保存到应用域(ServletContext) ; 第一次请求时,复用之前保存的BeanFactory对象.第二次请求, ...
+
+* ①方案一
+
+  ```java
+  @WebServlet("/user/findAll")
+  public class FindAllUserController extends HttpServlet {
+  
+      @Override
+      protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          BeanFactory beanFactory = (BeanFactory) getServletContext().getAttribute("applicationContext");
+          if (null == beanFactory) {
+              System.out.println("第一次请求");
+              //第一次请求时, 获取BeanFactory对象并保存到应用域
+              beanFactory = new ClassPathXmlApplicationContext("spring-mvc.xml");
+              getServletContext().setAttribute("applicationContext", beanFactory);
+          }
+          //第二次请求时, 直接从应用域获取BeanFactory对象并使用
+          UserService userService = beanFactory.getBean(UserService.class);
+          userService.findAll();
+      }
+  
+      @Override
+      protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          doGet(req, resp);
+      }
+  }
+  ```
+  
+* ②方案二
+
+  ```xml
+  <listener>
+      <listener-class>com.qh.mvc.MyContextLoaderListener</listener-class>
+  </listener>
+  ```
+
+  ```java
+  public class MyContextLoaderListener implements ServletContextListener {
+  
+      public void contextInitialized(ServletContextEvent sce) {
+          System.out.println("服务器启动");
+          //服务器启动, 创建BeanFactory对象并存储到应用域
+          BeanFactory beanFactory = new ClassPathXmlApplicationContext("spring-mvc.xml");
+          sce.getServletContext().setAttribute("applicationContext", beanFactory);
+      }
+  
+      public void contextDestroyed(ServletContextEvent sce) {
+          //服务器关闭
+          System.out.println("服务器关闭");
+  
+      }
+  }
+  ```
+
+  ```java
+  @WebServlet("/user/findAll")
+  public class FindAllUserController extends HttpServlet {
+  
+      @Override
+      protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          BeanFactory beanFactory = (BeanFactory) getServletContext().getAttribute("applicationContext");
+          UserService userService = beanFactory.getBean(UserService.class);
+          userService.findAll();
+      }
+  
+      @Override
+      protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          doGet(req, resp);
+      }
+  }
+  ```
+  
+* 存在的问题
+  * ①在MyContextLoaderListener中`spring-mvc.xml`存在字符串硬编码;
+  * ②`FindAllUserController类`和`MyContextLoaderListener类`的"applicationContext"字符串存在高耦合
+
+### 03-手撕SpringMVC框架第三版
+
+* ①解决`spring-mvc.xml`字符串硬编码
+
+  ```xml
+  <context-param>
+      <param-name>contextConfigLocation</param-name>
+      <param-value>classpath:spring-mvc.xml</param-value>
+  </context-param>
+  
+  <listener>
+      <listener-class>com.qh.mvc.MyContextLoaderListener</listener-class>
+  </listener>
+  ```
+  
+  ```java
+  public class MyContextLoaderListener implements ServletContextListener {
+  
+      public void contextInitialized(ServletContextEvent sce) {
+          System.out.println("服务器启动");
+          //服务器启动, 创建BeanFactory对象并存储到应用域
+          String configLocation = sce.getServletContext().getInitParameter("contextConfigLocation");
+          BeanFactory beanFactory = new ClassPathXmlApplicationContext(configLocation);
+          sce.getServletContext().setAttribute(ApplicationContextConstant.SERVLETCONTEXT_KEY_APPLICATIONCONTEXT, beanFactory);
+      }
+  
+      public void contextDestroyed(ServletContextEvent sce) {
+          //服务器关闭
+          System.out.println("服务器关闭");
+  
+      }
+  }
+  ```
+  
+* ②解决`MyContextLoaderListener`和`FindAllUserController`之间的高耦合
+
+  ```java
+  public class ApplicationContextConstant {
+  
+      public static final String SERVLETCONTEXT_KEY_APPLICATIONCONTEXT = "applicationContext";
+  }
+  ```
+  
+  ```java
+  public class WebApplicationContextUtils {
+  
+      public static ApplicationContext getApplicationContext(ServletContext servletContext) {
+          ApplicationContext applicationContext = (ApplicationContext) servletContext.getAttribute(ApplicationContextConstant.SERVLETCONTEXT_KEY_APPLICATIONCONTEXT);
+          return applicationContext;
+      }
+  
+  }
+  ```
+  
+  ```java
+  public class MyContextLoaderListener implements ServletContextListener {
+  
+      public void contextInitialized(ServletContextEvent sce) {
+          System.out.println("服务器启动");
+          //服务器启动, 创建BeanFactory对象并存储到应用域
+          String configLocation = sce.getServletContext().getInitParameter("contextConfigLocation");
+          BeanFactory beanFactory = new ClassPathXmlApplicationContext(configLocation);
+          sce.getServletContext().setAttribute(ApplicationContextConstant.SERVLETCONTEXT_KEY_APPLICATIONCONTEXT, beanFactory);
+      }
+  
+      public void contextDestroyed(ServletContextEvent sce) {
+          //服务器关闭
+          System.out.println("服务器关闭");
+  
+      }
+  }
+  ```
+  
+  ```java
+  @WebServlet("/user/findAll")
+  public class FindAllUserController extends HttpServlet {
+  
+      @Override
+      protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          ApplicationContext applicationContext = WebApplicationContextUtils.getApplicationContext(getServletContext());
+          UserService userService = applicationContext.getBean(UserService.class);
+          userService.findAll();
+      }
+  
+      @Override
+      protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          doGet(req, resp);
+      }
+  }
+  ```
+  
+* 存在的问题
+  * 随着项目的功能越来越多, Servlet也会越来越多, 维护起来就非常麻烦了.
+
+### 04-手撕SpringMVC框架最终版
+
+* 分析
+
+  * ![image-20230221093812238](https://qiuzhiwei1989.oss-cn-hangzhou.aliyuncs.com/WH220718/image-20230221093812238.png)
+
+* 代码实现
+
+  ```java
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target(ElementType.METHOD)
+  public @interface MyRequestMapping {
+  
+      /**
+       * 设置请求路径
+       * @return
+       */
+      String value();
+  }
+  ```
+  
+  ```java
+  public class MyDispatcherServlet extends HttpServlet {
+  
+      @Override
+      protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          //获取请求路径url
+          String uri = req.getRequestURI();
+          String[] infos = uri.split("/");
+          //获取对象名称
+          String beanName = infos[2];
+          //从IOC容器获取对象
+          ApplicationContext applicationContext = WebApplicationContextUtils.getApplicationContext(getServletContext());
+          Object instance = applicationContext.getBean(beanName);
+          //获取方法名称
+          String methodName = infos[3];
+          try {
+              //获取方法
+              Method method = instance.getClass().getMethod(methodName, HttpServletRequest.class, HttpServletResponse.class);
+              //判断方法上是否有@MyRequestMapping注解
+              boolean isAnnotationPresent = method.isAnnotationPresent(MyRequestMapping.class);
+              if (isAnnotationPresent) {
+                  //有@MyRequestMapping注解
+                  MyRequestMapping myRequestMapping = method.getAnnotation(MyRequestMapping.class);
+                  String methodUrl = myRequestMapping.value();
+                  if (uri.equals(req.getContextPath() + methodUrl)) {
+                      //请求路径和方法的请求路径一致, 就执行
+                      method.invoke(instance, req, resp);
+                  } else {
+                      throw new RuntimeException("请求路径错误!");
+  
+                  }
+              } else {
+                  throw new RuntimeException("controller方法没有使用@MyRequestMapping注解!");
+              }
+              //执行方法
+          } catch (Exception e) {
+              throw new RuntimeException(e);
+          }
+  
+      }
+  
+      @Override
+      protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+          doGet(req, resp);
+      }
+  }
+  ```
+  
+  ```xml
+  <servlet>
+      <servlet-name>mvc</servlet-name>
+      <servlet-class>com.qh.mvc.MyDispatcherServlet</servlet-class>
+  </servlet>
+  
+  <servlet-mapping>
+      <servlet-name>mvc</servlet-name>
+      <!--
+          /: 缺省Servlet, 可以处理404和静态资源
+          /*: 可以处理404和静态资源, 还有jsp(java server page)
+      -->
+      <url-pattern>/</url-pattern>
+  </servlet-mapping>
+  ```
+  
+  ```java
+  @Controller("user")
+  public class UserController {
+  
+  
+      @MyRequestMapping("/user/insert")
+      public void insert(HttpServletRequest request, HttpServletResponse response) {
+          System.out.println("UserController insert");
+      }
+  
+      @MyRequestMapping("/user/delete")
+      public void delete(HttpServletRequest request, HttpServletResponse response) {
+          System.out.println("UserController delete");
+      }
+  
+      @MyRequestMapping("/user/update")
+      public void update(HttpServletRequest request, HttpServletResponse response) {
+          System.out.println("UserController update");
+      }
+  
+      @MyRequestMapping("/user/findAll")
+      public void findAll(HttpServletRequest request, HttpServletResponse response) {
+          System.out.println("UserController findAll");
+      }
+  
+  }
+  ```
+  
+* 总结
+  * 在SpringMVC框架中, `ApplicationContextConstant`, `MyContextLoaderListener`, `MyDispatcherServlet`, `@MyRequestMapping`, `WebApplicationContextUtils`都已经写好了, 开发人员只需要做相关配置即可.
+
+### 05-SpringMVC概述
+
+* 概述
+  * SpringMVC框架定义ContextLoaderListener, WebApplicationContextUtils, DispatcherServlet等等来
+    完成mvc开发
+  * SpringMVC 是一种基于 Java 的实现 MVC 模型的轻量级 Web 框架。
+  * SpringMVC 已经成为目前最主流的MVC框架之一，并且随着Spring3.0 的发布，全面超越 Struts2，成为
+    最优秀的 MVC 框架。它通过一套注解，让一个简单的 Java 类成为处理请求的控制器，而无须实现任何接
+    口。同时它还支持 RESTful 编程风格的请求。
+
+* 三层架构
+  * ![ggeg4erwsyh46wyh4w](https://cdn.staticaly.com/gh/quinhua/pics@main/markdown/ggeg4erwsyh46wyh4w.1ao0c4cymtvk.webp)
+
+### 06-SpringMVC入门案例
+
+* 开发步骤
+
+  * ①引入依赖
+  * ②编写web.xml
+  * ③编写spring-mvc.xml
+  * ④定义controller代码
+  * ⑤代码测试
+
+* ①引入依赖
+
+  ```xml
+  <properties>
+      <maven.compiler.source>8</maven.compiler.source>
+      <maven.compiler.target>8</maven.compiler.target>
+      <junit.version>4.13.2</junit.version>
+      <lombok.version>1.18.22</lombok.version>
+      <spring.version>5.3.13</spring.version>
+      <servlet.version>4.0.1</servlet.version>
+      <thymeleaf.version>3.0.12.RELEASE</thymeleaf.version>
+  </properties>
+  
+  <dependencies>
+  
+      <!--web start-->
+      <dependency>
+          <groupId>org.thymeleaf</groupId>
+          <artifactId>thymeleaf-spring5</artifactId>
+          <version>${thymeleaf.version}</version>
+      </dependency>
+      <dependency>
+          <groupId>javax.servlet</groupId>
+          <artifactId>javax.servlet-api</artifactId>
+          <version>${servlet.version}</version>
+          <scope>provided</scope>
+      </dependency>
+      <!--web end-->
+  
+      <!--junit start-->
+      <dependency>
+          <groupId>junit</groupId>
+          <artifactId>junit</artifactId>
+          <version>${junit.version}</version>
+          <scope>test</scope>
+      </dependency>
+      <!--junit end-->
+  
+      <!--lombok start-->
+      <dependency>
+          <groupId>org.projectlombok</groupId>
+          <artifactId>lombok</artifactId>
+          <version>${lombok.version}</version>
+      </dependency>
+      <!--lombok end-->
+  
+      <!--spring start-->
+      <dependency>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-test</artifactId>
+          <version>${spring.version}</version>
+      </dependency>
+  
+      <dependency>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-aspects</artifactId>
+          <version>${spring.version}</version>
+      </dependency>
+  
+      <dependency>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-webmvc</artifactId>
+          <version>${spring.version}</version>
+      </dependency>
+      <!--spring end-->
+  
+  </dependencies>
+  ```
+  
+* ②编写web.xml
+
+  ```xml
+  <!--前端控制器-->
+  <servlet>
+     <servlet-name>mvc</servlet-name>
+     <servlet-class>org.springframework.web.servlet.DispatcherServlet</servlet-class>
+     <init-param>
+        <param-name>contextConfigLocation</param-name>
+        <param-value>classpath:spring-mvc.xml</param-value>
+     </init-param>
+     <!--随着服务器的启动而加载-->
+     <load-on-startup>1</load-on-startup>
+  </servlet>
+  
+  <servlet-mapping>
+     <servlet-name>mvc</servlet-name>
+     <url-pattern>/</url-pattern>
+  </servlet-mapping>
+  ```
+
+* ③编写spring-mvc.xml
+
+  ```xml
+  <?xml version="1.0" encoding="UTF-8"?>
+  <beans xmlns="http://www.springframework.org/schema/beans"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns:context="http://www.springframework.org/schema/context"
+         xsi:schemaLocation="
+         http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+         http://www.springframework.org/schema/context https://www.springframework.org/schema/context/spring-context.xsd">
+  
+      <!--扫描注解-->
+      <context:component-scan base-package="com.qh"></context:component-scan>
+  
+      <!--配置视图解析器-->
+      <bean id="viewResolver" class="org.thymeleaf.spring5.view.ThymeleafViewResolver">
+          <property name="order" value="1"/>
+          <property name="characterEncoding" value="UTF-8"/>
+          <property name="templateEngine">
+              <bean class="org.thymeleaf.spring5.SpringTemplateEngine">
+                  <property name="templateResolver">
+                      <bean class="org.thymeleaf.spring5.templateresolver.SpringResourceTemplateResolver">
+                          <!--视图前缀-->
+                          <property name="prefix" value="/WEB-INF/templates/"/>
+                          <!--视图后缀-->
+                          <property name="suffix" value=".html"/>
+                          <property name="templateMode" value="HTML5"/>
+                          <property name="characterEncoding" value="UTF-8" />
+                      </bean>
+                  </property>
+              </bean>
+          </property>
+      </bean>
+  
+  </beans>
+  ```
+  
+* ④定义controller代码
+
+  ```java
+  @Controller
+  public class UserController {
+  
+      @RequestMapping("/user/findAll")
+      public ModelAndView findAll() {
+          //数据和逻辑视图名称
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.addObject("msg","helloworld");
+          modelAndView.setViewName("user/index");
+          return modelAndView;
+      }
+  
+  }
+  ```
+
+* ⑤代码测试
+
+  * ![gw4easwhu5e4](https://cdn.staticaly.com/gh/quinhua/pics@main/markdown/gw4easwhu5e4.4n2zhc8abbi0.webp)
+
+### 07-SprngMVC执行流程(掌握)
+
+* 执行流程
+  * ![ghse4ahujw54enjers5td](https://cdn.staticaly.com/gh/quinhua/pics@main/markdown/ghse4ahujw54enjers5td.1fb05kssg2ps.webp)
+
+
+
+### 08-SpringMVC核心组件说明
+
+* 核心组件
+
+  | 组件         | 说明                                         |
+  | ------------ | -------------------------------------------- |
+  | 前端控制器   | DispatcherServlet, 负责资源调度              |
+  | 处理器映射器 | HandlerMapping, 负责查询handler方法          |
+  | 处理器适配器 | HandlerAdapter, 负责匹配handler方法          |
+  | 处理器       | handler, 就是handler方法, 负责处理请求和响应 |
+  | 视图解析器   | ViewResolver, 负责解析数据和视图             |
+
+### 09-SpringMVC核心组件配置
+
+* 概述
+
+  * 入门案例中, 手动配置了`DispatcherServlet`,`handler`,`ViewResolver`, 在*spring-webmvc*的`DispatcherServlet.properties`自动配置了`HandlerMapping`,`HandlerAdapter`.
+
+* DispatcherServlet.properties
+
+  ```properties
+  # Default implementation classes for DispatcherServlet's strategy interfaces.
+  # Used as fallback when no matching beans are found in the DispatcherServlet context.
+  # Not meant to be customized by application developers.
+  
+  org.springframework.web.servlet.LocaleResolver=org.springframework.web.servlet.i18n.AcceptHeaderLocaleResolver
+  
+  org.springframework.web.servlet.ThemeResolver=org.springframework.web.servlet.theme.FixedThemeResolver
+  
+  org.springframework.web.servlet.HandlerMapping=org.springframework.web.servlet.handler.BeanNameUrlHandlerMapping,\
+  	org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping,\
+  	org.springframework.web.servlet.function.support.RouterFunctionMapping
+  
+  org.springframework.web.servlet.HandlerAdapter=org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter,\
+  	org.springframework.web.servlet.mvc.SimpleControllerHandlerAdapter,\
+  	org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter,\
+  	org.springframework.web.servlet.function.support.HandlerFunctionAdapter
+  
+  
+  org.springframework.web.servlet.HandlerExceptionResolver=org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver,\
+  	org.springframework.web.servlet.mvc.annotation.ResponseStatusExceptionResolver,\
+  	org.springframework.web.servlet.mvc.support.DefaultHandlerExceptionResolver
+  
+  org.springframework.web.servlet.RequestToViewNameTranslator=org.springframework.web.servlet.view.DefaultRequestToViewNameTranslator
+  
+  org.springframework.web.servlet.ViewResolver=org.springframework.web.servlet.view.InternalResourceViewResolver
+  
+  org.springframework.web.servlet.FlashMapManager=org.springframework.web.servlet.support.SessionFlashMapManager
+  ```
+
+* 代码实现1: 挨个配置
+
+  ```xml
+  <!--处理器映射器-->
+  <bean class="org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping"></bean>
+  <!--处理器适配器-->
+  <bean class="org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter"></bean>
+  ```
+
+* 代码实现2: 自动配置 , **推荐**
+
+  ```xml
+  <!--处理器映射器-->
+  <!--处理器适配器-->
+  <!--一些其他组件, 比如: 类型转换器等等-->
+  <mvc:annotation-driven></mvc:annotation-driven>
+  ```
+
+### 10-静态资源放行
+
+* 概述
+
+  * 静态资源: 图片, css文件, js文件, html文件...
+  * `DispatcherServlet`的urlPattern为`/`, 意味着会处理`静态资源`和`404`, 但是没有能力处理, 访问静态资源会报错404.
+
+* 解决方案
+
+  * 将静态资源放行给tomcat内置的`DefaultServlet`处理.
+
+* ①方式一: 完整配置
+
+  ```xml
+  <!--
+      mapping: 静态资源的访问路径
+      location: 静态资源所在的目录
+  -->
+  <mvc:resources mapping="/css/**" location="/css/"></mvc:resources>
+  <mvc:resources mapping="/html/**" location="/html/"></mvc:resources>
+  <mvc:resources mapping="/img/**" location="/img/"></mvc:resources>
+  <mvc:resources mapping="/js/**" location="/js/"></mvc:resources>
+  ```
+
+* ②方式二: 简化配置, **推荐**
+
+  ```xml
+  <mvc:default-servlet-handler></mvc:default-servlet-handler>
+  ```
+
+
+### 11-@RequestMapping注解概述
+
+* 源码
+
+  ```java
+  @Target({ElementType.TYPE, ElementType.METHOD})
+  @Retention(RetentionPolicy.RUNTIME)
+  @Documented
+  @Mapping
+  public @interface RequestMapping {
+  
+     /**
+      * 名称
+      */
+     String name() default "";
+  
+     /**
+      * 等价于path
+      */
+     @AliasFor("path")
+     String[] value() default {};
+  
+     /**
+      * 设置访问路径
+      */
+     @AliasFor("value")
+     String[] path() default {};
+  
+     /**
+      * 设置请求方式
+      * GET, POST, HEAD, OPTIONS, PUT, PATCH, DELETE, TRACE.
+      */
+     RequestMethod[] method() default {};
+  
+     /**
+      * 设置需要携带的请求参数
+      */
+     String[] params() default {};
+  
+     /**
+      * 设置需要携带的请求头
+      */
+     String[] headers() default {};
+  
+  }
+  ```
+  
+* 作用
+  * ①设置访问路径
+  * ②设置请求方式
+  * ③设置需要携带的请求参数
+  * ④设置需要携带的请求头
+  * ⑤窄化请求
+
+### 12-@RequestMapping设置访问路径
+
+* 分类
+
+  * ①精确匹配: 输入网址必须和访问路径完全一样
+
+  * ②模糊匹配: 输入网址需要和前面的目录匹配上即可
+
+* 代码实现
+
+  ```java
+  //10-@RequestMapping设置访问路径
+  //①精确匹配
+  @RequestMapping("/request/test1")
+  public ModelAndView test1() {
+      System.out.println("RequestController test1");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  //②模糊匹配
+  @RequestMapping("/request/*")
+  public ModelAndView test2() {
+      System.out.println("RequestController test2");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  ```
+
+### 13-@RequestMapping设置请求方式
+
+* 概述
+  * 默认情况下, @RequestMapping不限制请求方式.
+* 请求方式: 不同请求方式对应不同的操作类型
+  * get: 查询
+  * post: **增加**, 删除, 修改
+  * put: 修改
+  * delete: 删除
+* 常用注解
+  * @RequestMapping
+  * @GetMapping: 底层是RequestMapping
+  * @PostMapping: 底层是RequestMapping
+  * @PutMapping: 底层是RequestMapping
+  * @DeleteMapping: 底层是RequestMapping
+
+* 代码实现
+
+  ```html
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <title>11-@RequestMapping设置请求方式</title>
+  </head>
+  <body
+  
+  <form action="/request/test2_2" method="get">
+      <button type="submit">get请求</button>
+  </form>
+  
+  <form action="/request/test2_2" method="post">
+      <button type="submit">post请求</button>
+  </form>
+  
+  </body>
+  </html>
+  ```
+  
+  ```java
+  //11-@RequestMapping设置请求方式
+  
+  //转发到`request/test2.html`页面
+  @RequestMapping("/request/test2.html")
+  public ModelAndView toTest2Page() {
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test2");
+      return modelAndView;
+  }
+  
+  //不限制请求方式
+  @RequestMapping("/request/test2")
+  public ModelAndView test2() {
+      System.out.println("RequestController test2");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  
+  //限制请求方式为get
+  @RequestMapping(path = "/request/test2_2" ,method = RequestMethod.GET)
+  public ModelAndView test2_2() {
+      System.out.println("RequestController test2_2 GET");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  
+  @GetMapping("/request/test2_2_2")
+  public ModelAndView test2_2_2() {
+      System.out.println("RequestController test2_2_2 GET");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  
+  //限制请求方式为post
+  @RequestMapping(path = "/request/test2_3" ,method = RequestMethod.POST)
+  public ModelAndView test2_3() {
+      System.out.println("RequestController test2_3 POST");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  
+  @PostMapping( "/request/test2_3_2" )
+  public ModelAndView test2_3_2() {
+      System.out.println("RequestController test2_3_2 POST");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  ```
+  
+* 注意事项
+
+  * `WEB-INF目录`中的资源不能够直接被外部访问, 只能通过请求转发访问.
+
+### 14-@RequestMapping设置请求参数
+
+* 概述
+  * 请求时必须要携带的参数
+
+* 代码实现
+
+  ```java
+  @RequestMapping(
+          path = "/request/test3",
+          params = {"username", "password"})
+  public ModelAndView test3() {
+      System.out.println("RequestController test3 ");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  ```
+
+### 15-@RequestMapping设置请求头
+
+* 代码实现
+
+  ```java
+  //13-@RequestMapping设置请求头
+  @RequestMapping(
+          path = "/request/test4",
+          headers = {"Host", "token"})
+  public ModelAndView test4() {
+      System.out.println("RequestController test3 ");
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  ```
+
+
+### 16-@RequestMapping窄化请求
+
+* 概述
+
+  * @RequestMapping作用在类上.
+
+* 代码实现
+
+  ```java
+  @Controller
+  @RequestMapping("/request2")
+  public class Request2Controller {
+  
+      //10-@RequestMapping设置访问路径
+      //①精确匹配
+      @RequestMapping("/test1")
+      public ModelAndView test1() {
+          System.out.println("RequestController test1");
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("index");
+          return modelAndView;
+      }
+  
+      //11-@RequestMapping设置请求方式
+  
+      //转发到`request/test2.html`页面
+      @RequestMapping("/test2.html")
+      public ModelAndView toTest2Page() {
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("request/test2");
+          return modelAndView;
+      }
+  
+      //不限制请求方式
+      @RequestMapping("/test2")
+      public ModelAndView test2() {
+          System.out.println("RequestController test2");
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("index");
+          return modelAndView;
+      }
+  
+      //限制请求方式为get
+      @RequestMapping(path = "/test2_2", method = RequestMethod.GET)
+      public ModelAndView test2_2() {
+          System.out.println("RequestController test2_2 GET");
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("index");
+          return modelAndView;
+      }
+  
+      @GetMapping("/test2_2_2")
+      public ModelAndView test2_2_2() {
+          System.out.println("RequestController test2_2_2 GET");
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("index");
+          return modelAndView;
+      }
+  
+      //限制请求方式为post
+      @RequestMapping(path = "/test2_3", method = RequestMethod.POST)
+      public ModelAndView test2_3() {
+          System.out.println("RequestController test2_3 POST");
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("index");
+          return modelAndView;
+      }
+  
+      @PostMapping("/test2_3_2")
+      public ModelAndView test2_3_2() {
+          System.out.println("RequestController test2_3_2 POST");
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("index");
+          return modelAndView;
+      }
+  
+      //12-@RequestMapping设置请求参数
+      @RequestMapping(
+              path = "/test3",
+              params = {"username", "password"})
+      public ModelAndView test3() {
+          System.out.println("RequestController test3 ");
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("index");
+          return modelAndView;
+      }
+  
+      //13-@RequestMapping设置请求头
+      @RequestMapping(
+              path = "/test4",
+              headers = {"Host"})
+      public ModelAndView test4() {
+          System.out.println("RequestController test3 ");
+          ModelAndView modelAndView = new ModelAndView();
+          modelAndView.setViewName("index");
+          return modelAndView;
+      }
+  
+  }
+  ```
+
+### 17-请求参数绑定概述
+
+* 概述
+  * 默认情况下, form表单提交的数据的类型是`键值对`, 将请求参数绑定到handler方法参数上.
+* 绑定参数类型
+  * 简单类型: 基本数据类型, 包装类, String
+  * 对象类型
+  * 集合类型: List , 数组, Map
+
+### 18-请求参数绑定之简单类型
+
+* 代码实现
+
+  ```html
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <title>16-请求参数绑定之简单类型</title>
+  </head>
+  <body>
+  
+  <form action="/day10/request/test5">
+      编号:<input type="text" name="id"><br>
+      姓名:<input type="text" name="username"><br>
+      <button type="submit">提交</button>
+  </form>
+  
+  </body>
+  </html>
+  ```
+
+  ```java
+  //16-请求参数绑定之简单类型
+  
+  @RequestMapping("/request/test5.html")
+  public ModelAndView toTest5Page() {
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test5");
+      return modelAndView;
+  }
+  
+  @RequestMapping("/request/test5")
+  public ModelAndView test5(Integer id , String username) {
+      System.out.println("RequestController test5 id = " + id);
+      System.out.println(" RequestControllertest5 username = " + username);
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  ```
+
+* 注意事项
+
+  * form绑定中的name属性值必须和方法形参名称一样!!!
+
+
+### 19-@RequestParam注解
+
+* 概述
+
+  ```
+  Annotation which indicates that a method parameter should be bound to a web request parameter.
+  ```
+
+  * 自定义请求参数绑定规则, 设置请求参数应该绑定到哪一个方法参数上.
+
+* 源码
+
+  ```java
+  @Target(ElementType.PARAMETER)
+  @Retention(RetentionPolicy.RUNTIME)
+  @Documented
+  public @interface RequestParam {
+  
+     /**
+      * 等价于name
+      */
+     @AliasFor("name")
+     String value() default "";
+  
+     /**
+      * 设置请求参数名称
+      */
+     @AliasFor("value")
+     String name() default "";
+  
+     /**
+      * 是否必须携带参数
+      */
+     boolean required() default true;
+  
+     /**
+      * 默认值
+      */
+     String defaultValue() default ValueConstants.DEFAULT_NONE;
+  
+  }
+  ```
+
+* 代码实现
+
+  ```html
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <title>17-@RequestParam注解</title>
+  </head>
+  <body>
+  
+  <form action="/day10/request/test6">
+    编号:<input type="text" name="id"><br>
+    姓名:<input type="text" name="username"><br>
+    <button type="submit">提交</button>
+  </form>
+  
+  </body>
+  </html>
+  ```
+
+  ```java
+  //17-@RequestParam注解
+  @RequestMapping("/request/test6.html")
+  public ModelAndView toTest6Page() {
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test6");
+      return modelAndView;
+  }
+  
+  @RequestMapping("/request/test6")
+  public ModelAndView test6(@RequestParam(name = "id", required = false, defaultValue = "250") Integer myId,
+                            String username) {
+      System.out.println("RequestController test5 id = " + myId);
+      System.out.println(" RequestControllertest5 username = " + username);
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("index");
+      return modelAndView;
+  }
+  ```
+
+### 20-请求参数绑定之对象类型(掌握)
+
+* 执行流程
+  * ![gersyht5w45yg3jh](https://cdn.staticaly.com/gh/quinhua/pics@main/markdown/gersyht5w45yg3jh.6t7lyemxwt40.webp)
+
+* 代码实现
+
+  ```html
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <title>17-@RequestParam注解</title>
+  </head>
+  <body>
+  
+  <form action="/day10/request/test7">
+    编号:<input type="text" name="id"><br>
+    姓名:<input type="text" name="username"><br>
+    <button type="submit">提交</button>
+  </form>
+  
+  </body>
+  </html>
+  ```
+
+  ```java
+  //18-请求参数绑定之对象类型
+  @RequestMapping("/request/test7.html")
+  public ModelAndView toTest7Page() {
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test7");
+      return modelAndView;
+  }
+  
+  @RequestMapping("/request/test7")
+  public ModelAndView test7(User user) {
+      System.out.println("RequestController test7 user = " + user);
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test7");
+      return modelAndView;
+  }
+  ```
+
+* 注意事项
+
+  * ①form表单的`name属性值`需要和实体类的`set方法`保持一致, 和实体类的属性名称无关;
+  * ②set方法不能私有化, 否则请求参数绑定失败;
+  * ③set方法不能没有, 否则请求参数绑定失败.
+
+
+### 21-请求参数绑定之对象包装类型
+
+* 概述
+
+  * 对象包装类型: 一个类包含另一个类
+
+* 代码实现
+
+  ```html
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <title>19-请求参数绑定之对象包装类型</title>
+  </head>
+  <body>
+  
+  <form action="/day10/request/test8">
+    编号:<input type="text" name="user.id"><br>
+    姓名:<input type="text" name="user.username"><br>
+    <button type="submit">提交</button>
+  </form>
+  
+  </body>
+  </html>
+  ```
+
+  ```java
+  //19-请求参数绑定之对象包装类型
+  @RequestMapping("/request/test8.html")
+  public ModelAndView toTest8Page() {
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test8");
+      return modelAndView;
+  }
+  
+  @RequestMapping("/request/test8")
+  public ModelAndView test8(UserWrapper userWrapper) {
+      System.out.println("RequestController test8 userWrapper = " + userWrapper);
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test8");
+      return modelAndView;
+  }
+  ```
+
+### 22-请求参数中文乱码
+
+* 请求参数中文乱码
+
+  * get请求, 不会有;
+  * post请求, 会有.
+
+* 解决方案
+
+  * ①直接request.setCharacterEncoding("utf-8")告诉服务器以utf-8解码请求正文.
+  * ②在Filter过滤器中使用request.setCharacterEncoding("utf-8")告诉服务器以utf-8解码请求正文.
+
+* 概述
+
+  * SpringMVC内置了`CharacterEncodingFilter`过滤器来解决请求参数中文乱码问题, 开发人员只需要配置即可.
+
+* 源码分析
+
+  * ![geasje5t3gq4uje5h4](https://cdn.staticaly.com/gh/quinhua/pics@main/markdown/geasje5t3gq4uje5h4.4tbs1hfx8zy0.webp)
+
+* 代码实现
+
+  ```xml
+  <filter>
+      <filter-name>encoding</filter-name>
+      <filter-class>org.springframework.web.filter.CharacterEncodingFilter</filter-class>
+      <init-param>
+          <param-name>encoding</param-name>
+          <param-value>utf-8</param-value>
+      </init-param>
+      <init-param>
+          <param-name>forceRequestEncoding</param-name>
+          <param-value>true</param-value>
+      </init-param>
+  </filter>
+  
+  <filter-mapping>
+      <filter-name>encoding</filter-name>
+      <servlet-name>mvc</servlet-name>
+  </filter-mapping>
+  ```
+
+* 注意事项
+
+  * CharacterEncodingFilter只需要处理DispatcherServlet即可.
+
+### 23-请求参数绑定之容器
+
+* 概述
+
+  * 将form表单中的多个值封装到集合和数组中.
+
+* 代码实现
+
+  ```html
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <title>21-请求参数绑定之容器</title>
+  </head>
+  <body>
+  
+  <h1>①数组</h1>
+  <form action="/day10/request/test9_1">
+      编号1:<input type="text" name="ids"><br>
+      编号2:<input type="text" name="ids"><br>
+      编号3:<input type="text" name="ids"><br>
+      <button type="submit">数组提交</button>
+  </form>
+  
+  <h1>①集合</h1>
+  <form action="/day10/request/test9_2">
+      编号1:<input type="text" name="ids"><br>
+      编号2:<input type="text" name="ids"><br>
+      编号3:<input type="text" name="ids"><br>
+      <button type="submit">集合提交</button>
+  </form>
+  
+  </body>
+  </html>
+  ```
+
+  ```java
+  //21-请求参数绑定之容器
+  //①数组
+  @RequestMapping("/request/test9.html")
+  public ModelAndView toTest9Page() {
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test9");
+      return modelAndView;
+  }
+  
+  @RequestMapping("/request/test9_1")
+  public ModelAndView test9_1(Integer[] ids) {
+      System.out.println("RequestController test9_1 ids = " + Arrays.toString(ids));
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test9");
+      return modelAndView;
+  }
+  
+  @RequestMapping("/request/test9_2")
+  public ModelAndView test9_2(@RequestParam List<Integer> ids) {
+      System.out.println("RequestController test9_2 ids = " + ids);
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test9");
+      return modelAndView;
+  }
+  ```
+
+* 注意事项
+  * 使用集合接收多个值, 需要使用`@RequestParam注解`标记.
+
+### 24-请求参数绑定之Map
+
+* 代码实现
+
+  ```html
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <title>22-请求参数绑定之Map</title>
+  </head>
+  <body>
+  
+  <form action="/day10/request/test10">
+    编号:<input type="text" name="id"><br>
+    姓名:<input type="text" name="username"><br>
+    <button type="submit">提交</button>
+  </form>
+  
+  </body>
+  </html>
+  ```
+
+  ```java
+  //22-请求参数绑定之Map
+  @RequestMapping("/request/test10.html")
+  public ModelAndView toTest10Page() {
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test10");
+      return modelAndView;
+  }
+  
+  @RequestMapping("/request/test10")
+  public ModelAndView test10(@RequestParam Map map) {
+      System.out.println("RequestController test10 map = " + map);
+      ModelAndView modelAndView = new ModelAndView();
+      modelAndView.setViewName("request/test10");
+      return modelAndView;
+  }
+  ```
+
+* 注意事项
+
+  * 使用map接收对象信息, 需使用`@RequestParam注解`标记.
+
+
+### 25-viewcontroller标签使用
+
+* 概述
+  * 用于跳转页面, 替代只用于跳转页面的Handler方法.
+  * 推荐使用Handler方法.
+
+* 代码实现
+
+  ```xml
+  <mvc:view-controller path="/request/test11.html" view-name="request/test11"></mvc:view-controller>
+  ```
