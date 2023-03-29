@@ -341,6 +341,8 @@ curl https://jdg3h6.lafyun.com:443/bingone
 
 ```xml
 curl -d'qq=2867462354' -X POST https://jdg3h6.lafyun.comqq43/
+
+curl -uri 'https://jdg3h6.lafyun.com:443/qq' -body 'qq=2867463524' -method 'POST'
 ```
 
 ## 8.date

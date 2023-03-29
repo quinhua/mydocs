@@ -2,6 +2,8 @@
 
 [pug中文网](https://pugjs.org/)需要有node环境。
 
+[methodot官网](https://factory.methodot.com/)
+
     npm i -D pug pug-plain-loader
 
 > pug 一般与 pug-plain-loader 一起安装，pug-plain-loader 用于解析 pug。
