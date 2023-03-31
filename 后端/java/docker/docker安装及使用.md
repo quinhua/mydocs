@@ -405,7 +405,7 @@ cat 文件名.tar | docker import - 镜像用户/镜像名:镜像版本号
 docker export 容器ID > 文件名.tar
 ```
 
-#### 17.commit编辑操作
+#### 18.commit编辑操作
 
 > docker commit提交一个新的容器副本使之成为一个新的镜像，类似于java反射
 
