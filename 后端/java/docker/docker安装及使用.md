@@ -388,7 +388,14 @@ docker cp  容器ID:容器内路径 目的主机路径
 # [root@07ea64240119] @ 后为容器ID
 ```
 
-#### 16.导入与导出
+#### 16.压缩镜像
+
+```dockerfile
+docker save -o 自定义压缩包名.压缩后缀 要压缩的镜像
+# docker save -o nginx.tar.gz nginx
+```
+
+#### 17.导入与导出
 
 ```dockerfile
 # 导入
